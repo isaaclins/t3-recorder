@@ -10,7 +10,7 @@ Show an agent what went wrong instead of describing it afterwards. A Mac menu ba
 | ⌃⌥M | Mark mode on or off. While on (yellow rim), clicks and drags don't reach the app: a click highlights a spot, a drag frames an area. |
 | ⌃⌥D | Drawing on or off. Then P pen, R rectangle, O circle, A arrow, T text, Z undo, C clear, Esc back to the normal mouse. |
 
-Both ⌃⌥R and ⌃⌥M can be changed in the menu bar icon's menu.
+Clicking the menu bar icon opens a panel with the same actions, your recent recordings and the settings. ⌃⌥R and ⌃⌥M can be changed under Settings there. Arrow keys, Return and Esc work in it too.
 
 When you stop, it transcribes on the Mac with Parakeet (no audio leaves it) and picks screenshots: after clicks, marks and screen changes, and at least every 12 seconds of talking. Then the clipboard holds `report.txt` and the screenshots. Paste into T3, add a word if you like, send.
 
@@ -24,7 +24,7 @@ The video stays on your Mac, because about 17 MB a minute is a lot to send when 
 
 They travel as files because T3 drops pasted text when images come along, and because T3's own connection then carries everything: no upload, no server, it works wherever T3 works.
 
-"Edit a recording" in the menu opens the editor: fix misheard words, remove lines, cut parts, add shapes and notes at a moment, record another section, then copy again, with or without the video. Edits never touch the raw clips in `~/Library/Application Support/T3Recorder/Recordings/`.
+Clicking a recording in the panel opens the editor: fix misheard words, remove lines, cut parts, add shapes and notes at a moment, record another section, then copy again, with or without the video. Edits never touch the raw clips in `~/Library/Application Support/T3Recorder/Recordings/`.
 
 ## Install
 

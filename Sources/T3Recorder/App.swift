@@ -5,13 +5,16 @@ import Carbon.HIToolbox
 import RecorderCore
 
 /// Menu bar app. The whole loop runs from one key combination: press, show the problem, press again, paste into T3.
-final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppController: NSObject, NSApplicationDelegate {
     private enum State { case idle, recording, working }
 
     private var state = State.idle {
         didSet {
             DispatchQueue.main.async {
                 self.refreshIcon()
+                self.panel.model.phase = self.state == .recording ? .recording : (self.state == .working ? .working : .idle)
+                if self.state != .working { self.panel.model.status = "" }
+                self.panel.model.firstFocus()
                 self.updates.installIfIdle()
             }
         }
@@ -21,6 +24,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let toast = Toast()
     private let watcher = ClickWatcher()
     private var statusItem: NSStatusItem!
+    private var panel: PanelController!
     private var screenRecorder: ScreenRecorder?
     private var mic: MicRecorder?
     private var overlayPanel: OverlayPanel?
@@ -38,7 +42,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var screenInfo = ScreenInfo(name: "", width: 0, height: 0)
     private var appendingTo: EditorController?
     private var editor: EditorController?
-    private var keyCatcher: Any?
     private var markStartedAt = 0.0
     private let updates = Updates()
 
@@ -46,9 +49,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? FileManager.default.createDirectory(at: Config.support, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: Config.recordings, withIntermediateDirectories: true)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(iconPressed)
+        statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+        panel = PanelController(button: statusItem.button)
+        panel.model.perform = { [weak self] in self?.panelChose($0) }
+        panel.onCapture = { [weak self] in self?.saveShortcut($0, $1) }
+        panel.onCaptureEnded = { [weak self] in self?.registerHotKey() }
+        panel.onOpen = { [weak self] window in Task { await self?.screenRecorder?.exclude(window) } }
         refreshIcon()
         registerHotKey()
         watcher.onAction = { [weak self] in self?.clickAction($0) }
@@ -77,81 +85,88 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem?.button?.contentTintColor = state == .recording ? .systemRed : nil
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        add(menu, state == .recording ? "Stop recording (\(shortcutName))" : "Start recording (\(shortcutName))", #selector(toggleFromMenu))
-        let recent = NSMenu()
-        for url in recentRecordings().prefix(8) {
-            let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecent), keyEquivalent: "")
-            item.target = self
-            item.representedObject = url
-            recent.addItem(item)
-        }
-        let recentItem = NSMenuItem(title: "Edit a recording", action: nil, keyEquivalent: "")
-        recentItem.submenu = recent
-        recentItem.isEnabled = recent.numberOfItems > 0
-        menu.addItem(recentItem)
-        menu.addItem(.separator())
-        add(menu, "Change start shortcut (\(shortcutName))…", #selector(changeStartShortcut))
-        add(menu, "Change mark mode shortcut (\(markShortcutName))…", #selector(changeMarkShortcut))
-        if !AXIsProcessTrusted() { add(menu, "Allow marking clicks (Accessibility)…", #selector(openAccessibility)) }
-        add(menu, "Show recordings folder", #selector(showFolder))
-        menu.addItem(.separator())
-        if updates.isAvailable { add(menu, "Check for updates (\(Updates.version))", #selector(checkForUpdates)) }
-        add(menu, "Quit T3 Recorder", #selector(quit))
-    }
-
-    private func add(_ menu: NSMenu, _ title: String, _ action: Selector) {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
-    }
-
     private func recentRecordings() -> [URL] {
         let all = (try? FileManager.default.contentsOfDirectory(at: Config.recordings, includingPropertiesForKeys: nil)) ?? []
         return all.filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("project.json").path) }
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
-    @objc private func toggleFromMenu() { toggle() }
-    @objc private func checkForUpdates() { updates.checkNow() }
-    @objc private func quit() { NSApp.terminate(nil) }
-    @objc private func showFolder() { NSWorkspace.shared.open(Config.recordings) }
-    @objc private func openAccessibility() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+    @objc private func iconPressed() {
+        guard !panel.isOpen else { return panel.close() }
+        refreshPanel()
+        panel.open()
     }
-    @objc private func openRecent(_ item: NSMenuItem) {
-        if let url = item.representedObject as? URL { openEditor(url) }
-    }
-    @objc private func changeStartShortcut() { catchShortcut { $0.hotKeyCode = $1; $0.hotKeyModifiers = $2 } }
-    @objc private func changeMarkShortcut() { catchShortcut { $0.markHotKeyCode = $1; $0.markHotKeyModifiers = $2 } }
 
-    private func catchShortcut(_ store: @escaping (inout Config, UInt32, UInt32) -> Void) {
-        toast.show("Press the new shortcut now. Esc cancels.")
-        keys.remove(id: 1)
-        NSApp.activate(ignoringOtherApps: true)
-        keyCatcher = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            guard let self else { return e }
-            let mods = HotKeys.carbonModifiers(e.modifierFlags)
-            if e.keyCode == 53 || mods != 0 {
-                if e.keyCode != 53 {
-                    store(&self.config, UInt32(e.keyCode), mods)
-                    self.config.save()
-                }
-                if let c = self.keyCatcher { NSEvent.removeMonitor(c) }
-                self.keyCatcher = nil
-                self.registerHotKey()
-                self.toast.show(e.keyCode == 53 ? "Nothing changed." : "Saved.", seconds: 3)
-                return nil
-            }
-            return e
+    private func refreshPanel() {
+        let m = panel.model
+        m.recents = recentRecordings().prefix(6).map { url in
+            let length = (try? ProjectStore.load(url)).map { Report.stamp($0.duration) } ?? ""
+            return RecentRecording(dir: url, title: Project.title(id: url.lastPathComponent), length: length)
         }
+        m.startKeys = shortcutName
+        m.markKeys = markShortcutName
+        m.canTakeClicks = AXIsProcessTrusted()
+        m.updatesAvailable = updates.isAvailable
+    }
+
+    private func panelChose(_ item: PanelModel.Item) {
+        switch item {
+        case .toggleRecording:
+            panel.close()
+            toggle()
+        case .markMode: toggleMarkMode()
+        case .edit(let r):
+            panel.close()
+            openEditor(r.dir)
+        case .copy(let r): copyFromPanel(r, withVideo: false)
+        case .copyWithVideo(let r): copyFromPanel(r, withVideo: true)
+        case .change(let shortcut):
+            panel.model.capturing = shortcut
+            keys.remove(id: 1)
+        case .allowAccessibility:
+            panel.close()
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        case .showFolder:
+            panel.close()
+            NSWorkspace.shared.open(Config.recordings)
+        case .checkForUpdates:
+            panel.close()
+            updates.checkNow()
+        case .quit: NSApp.terminate(nil)
+        case .settings, .back: break
+        }
+    }
+
+    private func copyFromPanel(_ recording: RecentRecording, withVideo: Bool) {
+        panel.close()
+        guard let project = try? ProjectStore.load(recording.dir) else { return toast.show("Could not open that recording.", seconds: 4) }
+        copyAgain(project, in: recording.dir, withVideo: withVideo)
+    }
+
+    private func saveShortcut(_ code: UInt32, _ mods: UInt32) {
+        guard let which = panel.model.capturing else { return }
+        let taken = which == .start ? (config.markHotKeyCode, config.markHotKeyModifiers) : (config.hotKeyCode, config.hotKeyModifiers)
+        if (code, mods) == taken { return toast.show("That shortcut is already in use here.", seconds: 3) }
+        if which == .start {
+            config.hotKeyCode = code
+            config.hotKeyModifiers = mods
+        } else {
+            config.markHotKeyCode = code
+            config.markHotKeyModifiers = mods
+        }
+        config.save()
+        panel.model.startKeys = shortcutName
+        panel.model.markKeys = markShortcutName
     }
 
     private func toggle() {
         switch state {
-        case .idle: Task { @MainActor in await self.start() }
-        case .recording: Task { @MainActor in await self.stop() }
+        case .idle:
+            panel.close()
+            Task { @MainActor in await self.start() }
+        case .recording:
+            panel.close()
+            Task { @MainActor in await self.stop() }
         case .working: toast.show("Still finishing the last recording.", seconds: 2)
         }
     }
@@ -236,7 +251,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        watcher.keepsClicks = { [weak self] p in self?.barContains(p) ?? false }
+        watcher.keepsClicks = { [weak self] p in self?.ownWindowsContain(p) ?? false }
         watcher.start()
         if let front = NSWorkspace.shared.frontmostApplication { log(.app, app: front.localizedName) }
         appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
@@ -248,7 +263,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             view.tool = view.tool == nil ? .pen : nil
         }
         keys.set(id: 3, keyCode: config.markHotKeyCode, modifiers: config.markHotKeyModifiers) { [weak self] in self?.toggleMarkMode() }
-        ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.toolBar?.setTime(self?.now ?? 0) }
+        ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.toolBar?.setTime(self.now)
+            self.panel.model.time = self.now
+        }
         state = .recording
         if !haveMic { toast.show("Recording without your voice: allow T3 Recorder under Microphone in System Settings.", seconds: 8) }
         Log.info("recording \(dir.lastPathComponent) \(clipID) on \(screenInfo.name)")
@@ -266,6 +285,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         watcher.markMode = on
         overlayView?.markMode = on
         toolBar?.showMarkMode(on)
+        panel.model.markMode = on
     }
 
     private var now: Double { max(0, CACurrentMediaTime() - (screenRecorder?.startTime ?? CACurrentMediaTime())) }
@@ -284,7 +304,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let local: (CGPoint) -> CGPoint = { [displayBounds] p in CGPoint(x: p.x - displayBounds.minX, y: p.y - displayBounds.minY) }
         switch action {
         case .click(let p):
-            guard view.tool == nil, let rect = normalized(p), !barContains(p) else { return }
+            guard view.tool == nil, let rect = normalized(p), !ownWindowsContain(p) else { return }
             let under = WindowLookup.at(p)
             log(.click, app: under?.app, window: under?.window, rect: rect)
         case .markBegan(let p):
@@ -299,9 +319,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func barContains(_ cgPoint: CGPoint) -> Bool {
-        guard let frame = toolBar?.panel.frame else { return false }
-        return frame.contains(CGPoint(x: cgPoint.x, y: NSScreen.screens[0].frame.height - cgPoint.y))
+    /// The toolbar, the menu bar icon and its panel keep working in mark mode, and clicking them is not part of the story.
+    private func ownWindowsContain(_ cgPoint: CGPoint) -> Bool {
+        let p = CGPoint(x: cgPoint.x, y: NSScreen.screens[0].frame.height - cgPoint.y)
+        return [toolBar?.panel.frame, statusItem.button?.window?.frame, panel.frame].contains { $0?.contains(p) == true }
     }
 
     private func logDrawing(_ d: OverlayView.Drawn, began: Double) {
@@ -317,6 +338,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ticker?.invalidate()
         ticker = nil
         watcher.stop()
+        panel.model.markMode = false
         keys.remove(id: 2)
         keys.remove(id: 3)
         if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
@@ -340,7 +362,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         appendingTo = nil
         let dir = self.dir!
         do {
-            toast.show("Finishing…")
+            progress("Finishing…")
             var project = (try? ProjectStore.load(dir)) ?? Project(id: dir.lastPathComponent, createdAt: Date())
             let duration = try await AVURLAsset(url: dir.appendingPathComponent(videoName)).load(.duration).seconds
             let clip = Clip(id: clipID, videoFile: videoName, audioFile: audioName, duration: duration, audioOffset: audioStart - videoStart, screen: screenInfo)
@@ -361,13 +383,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func progress(_ message: String) {
+        toast.show(message)
+        panel.model.status = message
+    }
+
     /// Voice is optional: a failed transcript must never cost Isaac the recording.
     @MainActor private func spoken(_ clip: Clip, in dir: URL) async -> [Event] {
         guard let audio = clip.audioFile else { return [] }
         do {
-            let toast = self.toast
-            let words = try await Parakeet.shared.words(in: dir.appendingPathComponent(audio)) { message in
-                DispatchQueue.main.async { toast.show(message) }
+            let words = try await Parakeet.shared.words(in: dir.appendingPathComponent(audio)) { [weak self] message in
+                DispatchQueue.main.async { self?.progress(message) }
             }
             return Transcript.lines(words).map {
                 Event(clipID: clip.id, t: $0.start + clip.audioOffset, end: $0.end + clip.audioOffset, kind: .said, text: $0.text)
@@ -381,9 +407,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Render, clipboard. Also what the editor's Copy buttons run.
     @MainActor func deliver(_ project: Project, in dir: URL, withVideo: Bool = false) async throws {
         state = .working
-        let toast = self.toast
-        let result = try await Exporter.run(project, in: dir, includeVideo: withVideo) { message in
-            DispatchQueue.main.async { toast.show(message) }
+        let result = try await Exporter.run(project, in: dir, includeVideo: withVideo) { [weak self] message in
+            DispatchQueue.main.async { self?.progress(message) }
         }
         Exporter.copyToClipboard(result.files)
         state = .idle
@@ -414,6 +439,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The whole loop without hands, for checking a build: real capture, overlay, export and editor; only the mouse is simulated.
     @MainActor func selfTest(screenshot: String) async {
         toast.hiddenFromCapture = false
+        panel.hiddenFromCapture = false
         await start()
         guard state == .recording else { print("self test: did not start"); exit(1) }
         toolBar?.setTime(1)
@@ -431,17 +457,47 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         shoot(overlayPanel?.windowNumber, to: screenshot + "-overlay.png")
         shoot(toolBar?.panel.windowNumber, to: screenshot + "-bar.png")
         try? await Task.sleep(for: .seconds(1))
+        await shootPanel(to: screenshot + "-panel-recording.png")
+        panel.press(125)
+        print("panel while recording: open \(panel.isOpen), key \(panel.isKey), down lands on \(String(describing: panel.model.focus))")
+        panel.press(53)
+        print("panel after Esc: open \(panel.isOpen)")
         overlayView?.markMode = false
         clickAction(.click(CGPoint(x: displayBounds.minX + 100, y: displayBounds.maxY - 100)))
         try? await Task.sleep(for: .seconds(1))
         let folder = dir!
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.6))
+            await self.shootPanel(to: screenshot + "-panel-working.png")
+            self.panel.close()
+        }
         await stop()
+        try? await Task.sleep(for: .seconds(0.2))
         shoot(toast.windowNumber, to: screenshot + "-toast.png")
+        await shootPanel(to: screenshot + "-panel-idle.png")
+        panel.press(125)
+        print("panel idle: down lands on \(String(describing: panel.model.focus))")
+        panel.press(124)
+        print("panel idle: right lands on \(String(describing: panel.model.focus))")
+        panel.model.go(.settings)
+        try? await Task.sleep(for: .seconds(0.3))
+        shoot(panel.windowNumber, to: screenshot + "-panel-settings.png")
+        panel.press(53)
+        print("panel after Esc in settings: open \(panel.isOpen), page \(panel.model.page)")
+        panel.press(53)
+        print("panel after second Esc: open \(panel.isOpen)")
         print("self test: \(folder.lastPathComponent)\n" + ((try? String(contentsOf: folder.appendingPathComponent("out/report.txt"), encoding: .utf8)) ?? "no report"))
         openEditor(folder)
         try? await Task.sleep(for: .seconds(2.5))
         shoot(editor?.window?.windowNumber, to: screenshot)
         exit(0)
+    }
+
+    @MainActor private func shootPanel(to file: String) async {
+        refreshPanel()
+        panel.open()
+        try? await Task.sleep(for: .seconds(0.4))
+        shoot(panel.windowNumber, to: file)
     }
 
     private func shoot(_ window: Int?, to file: String) {
