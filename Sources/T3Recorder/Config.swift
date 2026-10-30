@@ -8,6 +8,10 @@ struct Config: Codable {
     /// Turns mark mode on and off during a recording. Default Control-Option-M.
     var markHotKeyCode: UInt32 = 46
     var markHotKeyModifiers: UInt32 = 0x1000 | 0x0800
+    /// Optional, so a config.json written by an older version still loads and keeps its shortcuts.
+    var onboardingDone: Bool?
+    /// The tour's page, so it carries on after macOS makes the app reopen for Screen Recording.
+    var onboardingStep: Int?
 
     static let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("T3Recorder")
     /// Not ~/Movies: macOS guards that folder, and T3 has to be able to read what lands on the clipboard.

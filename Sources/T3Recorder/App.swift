@@ -44,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var editor: EditorController?
     private var markStartedAt = 0.0
     private let updates = Updates()
+    private var onboarding: OnboardingController?
 
     func applicationDidFinishLaunching(_ note: Notification) {
         try? FileManager.default.createDirectory(at: Config.support, withIntermediateDirectories: true)
@@ -62,10 +63,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         watcher.onAction = { [weak self] in self?.clickAction($0) }
         updates.isBusy = { [weak self] in
             guard let self else { return false }
-            return self.state != .idle || self.editor?.window?.isVisible == true
+            return self.state != .idle || self.editor?.window?.isVisible == true || self.onboarding != nil
         }
         updates.start()
-        if !AXIsProcessTrusted() {
+        if config.onboardingDone != true, recentRecordings().isEmpty, !CommandLine.arguments.contains("--self-test") {
+            showOnboarding()
+        } else if !AXIsProcessTrusted() {
             AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         }
         Log.info("started, shortcut \(shortcutName)")
@@ -106,6 +109,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         m.startKeys = shortcutName
         m.markKeys = markShortcutName
         m.canTakeClicks = AXIsProcessTrusted()
+        m.startsAtLogin = LoginItem.isOn
         m.updatesAvailable = updates.isAvailable
     }
 
@@ -123,6 +127,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         case .change(let shortcut):
             panel.model.capturing = shortcut
             keys.remove(id: 1)
+        case .startAtLogin:
+            LoginItem.set(!LoginItem.isOn)
+            panel.model.startsAtLogin = LoginItem.isOn
+        case .tour:
+            panel.close()
+            showOnboarding(from: .welcome)
         case .allowAccessibility:
             panel.close()
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
@@ -134,6 +144,67 @@ final class AppController: NSObject, NSApplicationDelegate {
             updates.checkNow()
         case .quit: NSApp.terminate(nil)
         case .settings, .back: break
+        }
+    }
+
+    func showOnboarding(from first: OnboardingModel.Step? = nil) {
+        if let onboarding {
+            onboarding.showWindow(nil)
+            return NSApp.activate(ignoringOtherApps: true)
+        }
+        let step = first ?? config.onboardingStep.flatMap(OnboardingModel.Step.init) ?? .welcome
+        let tour = OnboardingController(step: step)
+        let m = tour.model
+        m.startKeys = shortcutName
+        m.markKeys = markShortcutName
+        m.onStep = { [weak self] in
+            self?.config.onboardingStep = $0.rawValue
+            self?.config.save()
+            self?.practice($0 == .shortcuts)
+        }
+        m.fetchSpeech = { [weak self] in self?.fetchSpeechModel() }
+        m.onFinish = { [weak self, weak tour] in
+            guard let self, self.onboarding != nil else { return }
+            self.practice(false)
+            self.config.onboardingDone = true
+            self.config.onboardingStep = nil
+            self.config.save()
+            self.onboarding = nil
+            tour?.close()
+            self.updates.installIfIdle()
+        }
+        onboarding = tour
+        m.show(step)
+        tour.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// While the tour's keys page is open the shortcuts only light up, they don't start anything.
+    private func practice(_ on: Bool) {
+        guard state == .idle else { return }
+        guard on, let m = onboarding?.model else {
+            keys.remove(id: 2)
+            keys.remove(id: 3)
+            return registerHotKey()
+        }
+        keys.set(id: 1, keyCode: config.hotKeyCode, modifiers: config.hotKeyModifiers) { [weak m] in m?.pressed(.start) }
+        keys.set(id: 3, keyCode: config.markHotKeyCode, modifiers: config.markHotKeyModifiers) { [weak m] in m?.pressed(.mark) }
+        keys.set(id: 2, keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(controlKey | optionKey)) { [weak m] in m?.pressed(.draw) }
+    }
+
+    private func fetchSpeechModel() {
+        guard let m = onboarding?.model else { return }
+        m.speech = .working(0, "Starting…")
+        Task {
+            do {
+                try await Parakeet.shared.prepare(progress: { [weak m] fraction, text in
+                    DispatchQueue.main.async { m?.speech = .working(fraction, text) }
+                })
+                await MainActor.run { m.speech = .ready }
+            } catch {
+                Log.info("speech model: \(error)")
+                await MainActor.run { m.speech = .failed }
+            }
         }
     }
 
@@ -179,6 +250,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     @MainActor private func start() async {
         guard state == .idle else { return }
+        practice(false)
         state = .working
         _ = await AVCaptureDevice.requestAccess(for: .audio)
         if !CGPreflightScreenCaptureAccess() {
@@ -498,6 +570,25 @@ final class AppController: NSObject, NSApplicationDelegate {
         panel.open()
         try? await Task.sleep(for: .seconds(0.4))
         shoot(panel.windowNumber, to: file)
+    }
+
+    /// Every page of the tour, photographed, with its keys pressed for real through the model.
+    @MainActor func tourTest(screenshot: String) async {
+        showOnboarding(from: .welcome)
+        guard let tour = onboarding else { print("tour test: did not open"); exit(1) }
+        tour.window?.sharingType = .readOnly
+        for step in OnboardingModel.Step.allCases {
+            tour.model.show(step)
+            if step == .shortcuts { tour.model.pressed(.start) }
+            if step == .speech { tour.model.speech = .working(0.42, "42%") }
+            try? await Task.sleep(for: .seconds(0.7))
+            shoot(tour.window?.windowNumber, to: "\(screenshot)-\(step.rawValue).png")
+            print("tour \(step): saved page \(config.onboardingStep ?? -1), button \(tour.model.stepDone ? "continue" : "skip")")
+        }
+        tour.model.next()
+        try? await Task.sleep(for: .seconds(0.3))
+        print("tour finished: open \(onboarding != nil), done \(config.onboardingDone ?? false), saved page \(String(describing: config.onboardingStep))")
+        exit(0)
     }
 
     private func shoot(_ window: Int?, to file: String) {

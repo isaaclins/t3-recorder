@@ -79,4 +79,8 @@ if args.count >= 3, args[1] == "--self-test" {
     // --self-test <screenshot.png>
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Task { @MainActor in await controller.selfTest(screenshot: args[2]) } }
 }
+if args.count >= 3, args[1] == "--tour-test" {
+    // --tour-test <screenshot prefix>: every page of the first-launch tour.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Task { @MainActor in await controller.tourTest(screenshot: args[2]) } }
+}
 app.run()
