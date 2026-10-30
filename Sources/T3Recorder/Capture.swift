@@ -8,6 +8,8 @@ import ScreenCaptureKit
 final class ScreenRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
     private var stream: SCStream?
     private var output: SCRecordingOutput?
+    private var display: SCDisplay?
+    private var excluded: [SCWindow] = []
     private var finished: CheckedContinuation<Void, Never>?
     private let lock = NSLock()
     private var started = false
@@ -20,7 +22,8 @@ final class ScreenRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegat
         guard let display = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
             throw RecorderError("No screen to record was found.")
         }
-        let excluded = content.windows.filter { windowIDs.contains($0.windowID) }
+        self.display = display
+        excluded = content.windows.filter { windowIDs.contains($0.windowID) }
         let filter = SCContentFilter(display: display, excludingWindows: excluded)
 
         let config = SCStreamConfiguration()
@@ -45,6 +48,15 @@ final class ScreenRecorder: NSObject, SCStreamDelegate, SCRecordingOutputDelegat
         startTime = CACurrentMediaTime()
         try await stream.startCapture()
         return (config.width, config.height)
+    }
+
+    /// Keeps a window that opened after the start out of the picture, the menu bar panel for one.
+    func exclude(_ windowID: CGWindowID) async {
+        guard let stream, let display, !excluded.contains(where: { $0.windowID == windowID }),
+              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+              let window = content.windows.first(where: { $0.windowID == windowID }) else { return }
+        excluded.append(window)
+        try? await stream.updateContentFilter(SCContentFilter(display: display, excludingWindows: excluded))
     }
 
     func stop() async {

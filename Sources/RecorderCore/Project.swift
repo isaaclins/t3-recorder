@@ -22,6 +22,24 @@ public struct Project: Codable, Equatable {
         return "r-" + f.string(from: date)
     }
 
+    /// A recording's name in a list: "Today, 19:33", "Yesterday, 19:33" or "28 Oct, 19:33".
+    public static func title(id: String, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = calendar.timeZone
+        parser.dateFormat = "yyyyMMdd-HHmmss"
+        guard let date = parser.date(from: String(id.dropFirst(2))) else { return id }
+        let out = DateFormatter()
+        out.locale = parser.locale
+        out.timeZone = calendar.timeZone
+        out.dateFormat = "HH:mm"
+        let time = out.string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) { return "Today, \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday, \(time)" }
+        out.dateFormat = "d MMM"
+        return "\(out.string(from: date)), \(time)"
+    }
+
     public var duration: Double { segments.reduce(0) { $0 + $1.length } }
 
     public func clip(_ id: String) -> Clip? { clips.first { $0.id == id } }

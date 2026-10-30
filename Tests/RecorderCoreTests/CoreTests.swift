@@ -109,6 +109,16 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Report.rows(p, frames: []).map(\.text), ["switched to Safari", "drew with the pen at 50% across, 50% down"])
     }
 
+    func testRecordingTitlesReadAsDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Zurich")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 30, hour: 20))!
+        XCTAssertEqual(Project.title(id: "r-20261030-193312", now: now, calendar: calendar), "Today, 19:33")
+        XCTAssertEqual(Project.title(id: "r-20261029-081500", now: now, calendar: calendar), "Yesterday, 08:15")
+        XCTAssertEqual(Project.title(id: "r-20261028-193312", now: now, calendar: calendar), "28 Oct, 19:33")
+        XCTAssertEqual(Project.title(id: "something-else", now: now, calendar: calendar), "something-else")
+    }
+
     func testProjectRoundTrips() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
