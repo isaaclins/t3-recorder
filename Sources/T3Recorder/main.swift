@@ -44,10 +44,10 @@ if args.count >= 5, args[1] == "--import" {
 }
 
 if args.count >= 3, args[1] == "--export" {
-    // --export <folder>: render, put the files on the clipboard, print them.
+    // --export <folder> [--with-video]: render, put the files on the clipboard, print them.
     finish {
         let dir = URL(fileURLWithPath: args[2])
-        let result = try await Exporter.run(try ProjectStore.load(dir), in: dir) { print($0) }
+        let result = try await Exporter.run(try ProjectStore.load(dir), in: dir, includeVideo: args.contains("--with-video")) { print($0) }
         Exporter.copyToClipboard(result.files)
         print(result.files.map(\.path).joined(separator: "\n"))
     }

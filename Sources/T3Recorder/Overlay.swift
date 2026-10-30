@@ -297,24 +297,33 @@ final class ToolBar: NSObject {
     @objc private func stopPressed() { onStop?() }
 }
 
-/// Short message in the corner, optionally with one button.
+/// Short message in the corner, optionally with buttons.
 final class Toast {
+    struct Action {
+        var title: String
+        var run: () -> Void
+    }
+
     private var panel: NSPanel?
     private var hide: DispatchWorkItem?
-    private var action: (() -> Void)?
+    private var actions: [Action] = []
+    var windowNumber: Int? { panel?.windowNumber }
+    /// Hidden from every recording; only the self test turns this off to photograph it.
+    var hiddenFromCapture = true
 
-    func show(_ text: String, button: String? = nil, seconds: Double? = nil, action: (() -> Void)? = nil) {
+    func show(_ text: String, buttons: [Action] = [], seconds: Double? = nil) {
         panel?.close()
         hide?.cancel()
-        self.action = action
+        actions = buttons
         let screen = NSScreen.main ?? NSScreen.screens[0]
-        let width: CGFloat = 340, height: CGFloat = 56
+        let buttonWidth: CGFloat = 100
+        let width = 256 + CGFloat(max(1, buttons.count)) * buttonWidth, height: CGFloat = 56
         let p = NSPanel(contentRect: NSRect(x: screen.visibleFrame.maxX - width - 16, y: screen.visibleFrame.maxY - height - 12, width: width, height: height),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
         p.level = .floating
-        p.sharingType = .none
+        p.sharingType = hiddenFromCapture ? .none : .readOnly
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.isReleasedWhenClosed = false
         let blur = NSVisualEffectView(frame: p.contentView!.bounds)
@@ -323,13 +332,14 @@ final class Toast {
         blur.wantsLayer = true
         blur.layer?.cornerRadius = 12
         let label = NSTextField(wrappingLabelWithString: text)
-        label.frame = NSRect(x: 14, y: 8, width: button == nil ? width - 28 : width - 100, height: 40)
+        label.frame = NSRect(x: 14, y: 8, width: width - 28 - CGFloat(buttons.count) * buttonWidth, height: 40)
         label.font = .systemFont(ofSize: 13, weight: .medium)
         blur.addSubview(label)
-        if let button {
-            let b = NSButton(title: button, target: self, action: #selector(pressed))
+        for (i, action) in buttons.enumerated() {
+            let b = NSButton(title: action.title, target: self, action: #selector(pressed))
             b.bezelStyle = .rounded
-            b.frame = NSRect(x: width - 80, y: 14, width: 68, height: 28)
+            b.tag = i
+            b.frame = NSRect(x: width - 8 - CGFloat(buttons.count - i) * buttonWidth, y: 14, width: buttonWidth - 4, height: 28)
             blur.addSubview(b)
         }
         p.contentView!.addSubview(blur)
@@ -342,8 +352,8 @@ final class Toast {
         }
     }
 
-    @objc private func pressed() {
+    @objc private func pressed(_ b: NSButton) {
         panel?.close()
-        action?()
+        actions[b.tag].run()
     }
 }
