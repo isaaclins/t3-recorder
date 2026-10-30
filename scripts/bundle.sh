@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build and sign "T3 Recorder.app". Usage: scripts/bundle.sh <out dir> <version> <build number> [feed url]
+# Build and sign "T3 Recorder.app". Usage: scripts/bundle.sh <out dir> <version> <build number>
 # Signed with the app's own identity in ~/.config/t3-recorder (mini only): it never changes, so macOS keeps the
 # Screen Recording, Microphone and Accessibility permissions across updates.
 set -euo pipefail
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 cd "$(dirname "$0")/.."
-OUT=$1 VERSION=$2 BUILD=$3 FEED=${4:-https://agent-machine.isaaclins.com/pub/$(cat ~/.config/t3-recorder/public-token)}
+OUT=$1 VERSION=$2 BUILD=$3
 CFG=~/.config/t3-recorder
 KC=$CFG/signing.keychain-db
 IDENTITY="T3 Recorder Local Signing"
@@ -15,7 +15,7 @@ APP="$OUT/T3 Recorder.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp .build/release/T3Recorder "$APP/Contents/MacOS/T3Recorder"
-sed -e "s/VERSION_NUMBER/$VERSION/" -e "s/BUILD_NUMBER/$BUILD/" -e "s#FEED_URL#$FEED/appcast.xml#" -e "s#PUBLIC_KEY#$(cat Resources/sparkle-public-key.txt)#" \
+sed -e "s/VERSION_NUMBER/$VERSION/" -e "s/BUILD_NUMBER/$BUILD/" -e "s#PUBLIC_KEY#$(cat Resources/sparkle-public-key.txt)#" \
   Resources/Info.plist > "$APP/Contents/Info.plist"
 for b in .build/release/*.bundle; do [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"; done
 ditto .build/release/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"

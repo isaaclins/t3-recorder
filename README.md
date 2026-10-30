@@ -26,7 +26,7 @@ They travel as files because T3 drops pasted text when images come along, and be
 
 ## Install
 
-Download the zip from the [latest release](https://github.com/isaaclins/t3-recorder/releases/latest), move `T3 Recorder.app` to Applications, then clear the download flag once (the app isn't notarized):
+Download the DMG from the [latest release](https://github.com/isaaclins/t3-recorder/releases/latest) and drag `T3 Recorder.app` to Applications. `SHA256SUMS.txt` on the release has the checksums. The app isn't notarized, so clear the download flag once:
 
 ```
 xattr -dr com.apple.quarantine "/Applications/T3 Recorder.app"
@@ -43,6 +43,6 @@ Open it and allow Screen Recording, Microphone and Accessibility. Updates instal
 
 ## Updates
 
-`scripts/release.sh X.Y.Z "what changed"` on the Mac mini ships a version: it builds, signs, publishes the feed and tags a GitHub release. The installed app (Sparkle) finds it at launch or within the hour and installs itself as soon as no recording or editor is open. The repo is private, so the feed and zip are served from a private link on the house (`~/share-public/t3-recorder`). Signing identity and update key live in `~/.config/t3-recorder`, with backups in the vault. Builds are not notarized: fine for Isaac's own Mac, not for handing the app to others.
+`scripts/release.sh X.Y.Z "what changed"` on the Mac mini ships a version: it builds, signs and publishes a GitHub release with the DMG, zip, checksums and Sparkle feed. The installed app (Sparkle) reads `releases/latest/download/appcast.xml` at launch and every hour, and installs itself as soon as no recording or editor is open. Updates only install when signed with the private update key, which lives in `~/.config/t3-recorder` with the signing identity (backups in the vault). Builds are not notarized.
 
 Checks without hands: `T3Recorder --self-test out.png` runs the whole loop with a simulated mouse; `--capture-test`, `--import` and `--export` run single steps.
