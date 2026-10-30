@@ -29,7 +29,11 @@ The clipboard holds text only, on purpose: when T3 gets text and images in one p
 - `Sources/RecorderCore`: timeline, cuts, screenshot choice, report text. No Apple media code, covered by `swift test`.
 - `Sources/T3Recorder`: the app.
 - `server/receive-recording`: forced command of the upload key on the mini (`~/house/bin/receive-recording`). The key can hand over a recording and do nothing else.
-- `scripts/install-mac.sh`: builds and installs on the MacBook from the mini.
+- `scripts/install-mac.sh`: first install on the MacBook from the newest release, run from the mini.
 - Settings: `~/Library/Application Support/T3Recorder/config.json`.
+
+## Updates
+
+`scripts/release.sh X.Y.Z "what changed"` on the Mac mini ships a version: it builds, signs, publishes the feed and tags a GitHub release. The installed app (Sparkle) finds it at launch or within the hour and installs itself as soon as no recording or editor is open. The repo is private, so the feed and zip are served from a private link on the house (`~/share-public/t3-recorder`). Signing identity and update key live in `~/.config/t3-recorder`, with backups in the vault. Builds are not notarized: fine for Isaac's own Mac, not for handing the app to others.
 
 Checks without hands: `T3Recorder --self-test out.png` runs the whole loop with a simulated mouse; `--capture-test`, `--import` and `--export` run single steps.

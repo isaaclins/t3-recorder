@@ -8,7 +8,14 @@ import RecorderCore
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum State { case idle, recording, working }
 
-    private var state = State.idle { didSet { DispatchQueue.main.async { self.refreshIcon() } } }
+    private var state = State.idle {
+        didSet {
+            DispatchQueue.main.async {
+                self.refreshIcon()
+                self.updates.installIfIdle()
+            }
+        }
+    }
     private var config = Config.load()
     private let keys = HotKeys()
     private let toast = Toast()
@@ -33,6 +40,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var editor: EditorController?
     private var keyCatcher: Any?
     private var markStartedAt = 0.0
+    private let updates = Updates()
 
     func applicationDidFinishLaunching(_ note: Notification) {
         try? FileManager.default.createDirectory(at: Config.support, withIntermediateDirectories: true)
@@ -44,6 +52,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshIcon()
         registerHotKey()
         watcher.onAction = { [weak self] in self?.clickAction($0) }
+        updates.isBusy = { [weak self] in
+            guard let self else { return false }
+            return self.state != .idle || self.editor?.window?.isVisible == true
+        }
+        updates.start()
         if !AXIsProcessTrusted() {
             AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
         }
@@ -84,6 +97,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !AXIsProcessTrusted() { add(menu, "Allow marking clicks (Accessibility)…", #selector(openAccessibility)) }
         add(menu, "Show recordings folder", #selector(showFolder))
         menu.addItem(.separator())
+        if updates.isAvailable { add(menu, "Check for updates (\(Updates.version))", #selector(checkForUpdates)) }
         add(menu, "Quit T3 Recorder", #selector(quit))
     }
 
@@ -100,6 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleFromMenu() { toggle() }
+    @objc private func checkForUpdates() { updates.checkNow() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func showFolder() { NSWorkspace.shared.open(Config.recordings) }
     @objc private func openAccessibility() {

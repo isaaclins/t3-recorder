@@ -7,12 +7,13 @@ let package = Package(
     dependencies: [
         // Parakeet speech-to-text on the Neural Engine, same version as the Steward app. No traits: no text-to-speech front ends needed.
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7", traits: []),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
     ],
     targets: [
         .target(name: "RecorderCore", path: "Sources/RecorderCore", swiftSettings: [.swiftLanguageMode(.v5)]),
         .executableTarget(
             name: "T3Recorder",
-            dependencies: ["RecorderCore", .product(name: "FluidAudio", package: "FluidAudio")],
+            dependencies: ["RecorderCore", .product(name: "FluidAudio", package: "FluidAudio"), .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/T3Recorder",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
