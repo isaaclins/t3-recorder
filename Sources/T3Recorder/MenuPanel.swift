@@ -19,7 +19,7 @@ final class PanelModel: ObservableObject {
     enum Item: Hashable {
         case toggleRecording, markMode, settings, quit, back
         case edit(RecentRecording), copy(RecentRecording), copyWithVideo(RecentRecording)
-        case change(Shortcut), allowAccessibility, showFolder, checkForUpdates
+        case change(Shortcut), startAtLogin, allowAccessibility, showFolder, tour, checkForUpdates
     }
 
     @Published var phase = Phase.idle
@@ -30,6 +30,7 @@ final class PanelModel: ObservableObject {
     @Published var startKeys = ""
     @Published var markKeys = ""
     @Published var canTakeClicks = true
+    @Published var startsAtLogin = false
     @Published var updatesAvailable = false
     @Published var page = Page.main
     @Published var focus: Item?
@@ -50,8 +51,9 @@ final class PanelModel: ObservableObject {
         case .settings:
             var rows: [[Item]] = [[.back]]
             if phase == .idle { rows += [[.change(.start)], [.change(.mark)]] }
+            rows.append([.startAtLogin])
             if !canTakeClicks { rows.append([.allowAccessibility]) }
-            rows.append([.showFolder])
+            rows += [[.showFolder], [.tour]]
             if updatesAvailable { rows.append([.checkForUpdates]) }
             return rows
         }
@@ -369,7 +371,16 @@ struct PanelView: View {
             if !model.canTakeClicks {
                 PanelRow(model: model, item: .allowAccessibility) { Text("Allow marking clicks (Accessibility)…") }
             }
+            PanelRow(model: model, item: .startAtLogin) {
+                HStack {
+                    Text("Start at login")
+                    Spacer()
+                    Text(model.startsAtLogin ? "On" : "Off").foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityValue(model.startsAtLogin ? "On" : "Off")
             PanelRow(model: model, item: .showFolder) { Text("Show recordings folder") }
+            PanelRow(model: model, item: .tour) { Text("Show the welcome tour") }
             Divider().padding(.vertical, 4)
             if model.updatesAvailable {
                 PanelRow(model: model, item: .checkForUpdates) {

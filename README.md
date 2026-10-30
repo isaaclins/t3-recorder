@@ -34,7 +34,7 @@ Download the DMG from the [latest release](https://github.com/isaaclins/t3-recor
 xattr -dr com.apple.quarantine "/Applications/T3 Recorder.app"
 ```
 
-Open it and allow Screen Recording, Microphone and Accessibility. Updates install themselves.
+Open it and a short tour shows the keys, asks for Screen Recording, Microphone and Accessibility one at a time, offers to start at login, and fetches the speech model. You can see it again under Settings in the menu bar panel. Updates install themselves.
 
 ## Parts
 
