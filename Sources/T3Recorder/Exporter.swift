@@ -7,10 +7,10 @@ import UniformTypeIdentifiers
 struct ExportResult {
     /// What goes on the clipboard, report first.
     var files: [URL]
-    var videoAttached: Bool
+    var video: VideoDelivery
 }
 
-/// Turns a project into what the agent gets: one video, the screenshots and the report.
+/// Turns a project into what the agent gets: the report and the screenshots, plus the video when it is asked for.
 enum Exporter {
     /// T3 takes files up to 50 MB.
     static let maxAttachmentBytes = 48 * 1024 * 1024
@@ -109,7 +109,8 @@ enum Exporter {
         return AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
     }
 
-    static func run(_ p: Project, in dir: URL, status: @escaping @Sendable (String) -> Void) async throws -> ExportResult {
+    /// The video is always rendered, the screenshots come out of it. `includeVideo` only decides whether it goes on the clipboard.
+    static func run(_ p: Project, in dir: URL, includeVideo: Bool = false, status: @escaping @Sendable (String) -> Void) async throws -> ExportResult {
         let out = dir.appendingPathComponent("out")
         try? FileManager.default.removeItem(at: out)
         let framesDir = out.appendingPathComponent("frames")
@@ -132,12 +133,12 @@ enum Exporter {
         let frames = try await writeFrames(chosen, asset: asset, to: framesDir)
 
         let size = (try? movie.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
-        let videoAttached = size <= maxAttachmentBytes
+        let video: VideoDelivery = !includeVideo ? .leftOut : (size <= maxAttachmentBytes ? .attached : .tooBig)
         let report = out.appendingPathComponent("report.txt")
-        try Report.document(p, frames: frames, videoAttached: videoAttached).write(to: report, atomically: true, encoding: .utf8)
+        try Report.document(p, frames: frames, video: video).write(to: report, atomically: true, encoding: .utf8)
         var files = [report] + frames.map { framesDir.appendingPathComponent($0.file) }
-        if videoAttached { files.append(movie) }
-        return ExportResult(files: files, videoAttached: videoAttached)
+        if video == .attached { files.append(movie) }
+        return ExportResult(files: files, video: video)
     }
 
     /// Puts files on the clipboard the way Finder does. Plain file URLs would reach T3 one file only.

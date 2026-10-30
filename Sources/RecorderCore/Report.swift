@@ -24,6 +24,11 @@ public struct TimelineRow: Equatable {
     }
 }
 
+/// What happened to the video on this paste. It stays on the Mac unless someone asks for it, because it is by far the biggest file.
+public enum VideoDelivery: Equatable {
+    case leftOut, attached, tooBig
+}
+
 public enum Report {
     public static func stamp(_ t: Double) -> String {
         let s = Int(max(0, t).rounded(.down))
@@ -80,14 +85,18 @@ public enum Report {
     }
 
     /// The report that travels with the screenshots. It goes as a file, because T3 drops pasted text when images come along.
-    public static func document(_ p: Project, frames: [FrameRef], videoAttached: Bool) -> String {
+    public static func document(_ p: Project, frames: [FrameRef], video: VideoDelivery) -> String {
         let screen = p.clips.first?.screen
         var head = "Screen recording from Isaac, \(stamp(p.duration)) long"
         if let screen { head += ", \(screen.name) (\(screen.width)x\(screen.height))" }
         head += ". This shows the problem; his words are transcribed, so a word may be misheard."
         var lines = [head]
         lines.append("The screenshots named below are attached to this message. Look at every one before you answer.")
-        lines.append(videoAttached ? "recording.mp4, also attached, is the full video." : "The full video was too big to attach; it stays on his Mac.")
+        switch video {
+        case .attached: lines.append("recording.mp4, also attached, is the full video.")
+        case .leftOut: lines.append("The full video is not attached; it stays on his Mac. Ask him for it if the screenshots don't settle something.")
+        case .tooBig: lines.append("The full video was too big to attach; it stays on his Mac.")
+        }
         lines.append("")
         lines.append("Times are minutes:seconds into the video. Places are percent of the screen from the top left.")
         for r in rows(p, frames: frames) { lines.append("[\(stamp(r.t))] \(r.label): \(r.text)") }

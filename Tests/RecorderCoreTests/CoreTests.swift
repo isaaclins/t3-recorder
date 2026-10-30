@@ -90,11 +90,14 @@ final class CoreTests: XCTestCase {
     func testReportNamesFramesAndSaysWhereTheVideoIs() {
         let p = twoClipProject()
         let frames = [FrameRef(t: 1.2, file: "f-00-01-2.jpg")]
-        let with = Report.document(p, frames: frames, videoAttached: true)
+        let with = Report.document(p, frames: frames, video: .attached)
         XCTAssertTrue(with.contains("[00:01] FRAME: f-00-01-2.jpg"))
         XCTAssertTrue(with.contains("[00:01] SAID: \"keep\""))
         XCTAssertTrue(with.contains("recording.mp4, also attached"))
-        XCTAssertTrue(Report.document(p, frames: frames, videoAttached: false).contains("too big to attach"))
+        XCTAssertTrue(Report.document(p, frames: frames, video: .tooBig).contains("too big to attach"))
+        let without = Report.document(p, frames: frames, video: .leftOut)
+        XCTAssertTrue(without.contains("not attached"))
+        XCTAssertFalse(without.contains("recording.mp4"))
     }
 
     func testReportWordingReadsLikeASentence() {

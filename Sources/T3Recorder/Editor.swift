@@ -12,7 +12,7 @@ final class EditorController: NSWindowController {
     init(dir: URL, app: AppController) throws {
         self.dir = dir
         model = EditorModel(project: try ProjectStore.load(dir), dir: dir, app: app)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1240, height: 740), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1260, height: 740), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         window.title = dir.lastPathComponent
         window.isReleasedWhenClosed = false
         window.center()
@@ -163,13 +163,13 @@ final class EditorController: NSWindowController {
         }
     }
 
-    func copy() {
+    func copy(withVideo: Bool = false) {
         guard let app else { return }
         busy = true
         player.pause()
         Task {
             do {
-                try await app.deliver(project, in: dir)
+                try await app.deliver(project, in: dir, withVideo: withVideo)
                 controller?.close()
             } catch {
                 _ = ask("Could not finish: \(error.localizedDescription)", input: false)
@@ -285,10 +285,10 @@ struct EditorView: View {
                 controls
             }
             .padding(12)
-            .frame(minWidth: 800)
-            list.frame(minWidth: 300, idealWidth: 360)
+            .frame(minWidth: 900)
+            list.frame(minWidth: 300, idealWidth: 340)
         }
-        .frame(minWidth: 1100, minHeight: 620)
+        .frame(minWidth: 1200, minHeight: 620)
     }
 
     private var timeline: some View {
@@ -334,9 +334,12 @@ struct EditorView: View {
         HStack(spacing: 8) {
             Button(action: model.togglePlay) { Image(systemName: "playpause.fill") }.keyboardShortcut(.space, modifiers: [])
             Divider().frame(height: 18)
-            Button("Cut from here") { model.markIn = model.time }
-            Button("to here") { model.markOut = model.time }
-            Button("Cut it", action: model.cutMarked).disabled(model.markIn == nil || model.markOut == nil)
+            Group {
+                Button("Cut from here") { model.markIn = model.time }
+                Button("to here") { model.markOut = model.time }
+                Button("Cut it", action: model.cutMarked).disabled(model.markIn == nil || model.markOut == nil)
+            }
+            .fixedSize()
             Divider().frame(height: 18)
             Picker("", selection: $model.tool) {
                 Text("Add…").tag(MarkShape?.none)
@@ -347,14 +350,23 @@ struct EditorView: View {
             }
             .labelsHidden()
             .frame(width: 110)
-            Button("Note", action: model.addNote)
-            Button("Record more", action: model.addSection)
-            Button("Undo", action: model.undo).keyboardShortcut("z")
+            Group {
+                Button("Note", action: model.addNote)
+                Button("Record more", action: model.addSection)
+                Button("Undo", action: model.undo).keyboardShortcut("z")
+            }
+            .fixedSize()
             Spacer()
-            Button(model.busy ? "Working…" : "Copy for T3", action: model.copy)
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-                .disabled(model.busy)
+            Group {
+                Button("Copy with video") { model.copy(withVideo: true) }
+                    .keyboardShortcut(.return, modifiers: [.command, .shift])
+                    .disabled(model.busy)
+                Button(model.busy ? "Working…" : "Copy for T3") { model.copy() }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.busy)
+            }
+            .fixedSize()
         }
         .lineLimit(1)
         .fixedSize(horizontal: false, vertical: true)

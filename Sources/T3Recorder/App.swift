@@ -378,22 +378,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Render, clipboard. Also what the editor's Copy button runs.
-    @MainActor func deliver(_ project: Project, in dir: URL) async throws {
+    /// Render, clipboard. Also what the editor's Copy buttons run.
+    @MainActor func deliver(_ project: Project, in dir: URL, withVideo: Bool = false) async throws {
         state = .working
         let toast = self.toast
-        let result = try await Exporter.run(project, in: dir) { message in
+        let result = try await Exporter.run(project, in: dir, includeVideo: withVideo) { message in
             DispatchQueue.main.async { toast.show(message) }
         }
         Exporter.copyToClipboard(result.files)
         state = .idle
-        let message = result.videoAttached ? "Copied. Paste it into T3." : "Copied, without the video: it is over 50 MB."
-        toast.show(message, button: "Edit", seconds: 12) { [weak self] in self?.openEditor(dir) }
+        let edit = Toast.Action(title: "Edit") { [weak self] in self?.openEditor(dir) }
+        switch result.video {
+        case .leftOut:
+            let addVideo = Toast.Action(title: "Add video") { [weak self] in self?.copyAgain(project, in: dir, withVideo: true) }
+            toast.show("Copied. Paste it into T3.", buttons: [addVideo, edit], seconds: 12)
+        case .attached: toast.show("Copied with the video. Paste it into T3.", buttons: [edit], seconds: 12)
+        case .tooBig: toast.show("Copied, without the video: it is over 50 MB.", buttons: [edit], seconds: 12)
+        }
         Log.info("delivered \(project.id), \(result.files.count) files")
+    }
+
+    func copyAgain(_ project: Project, in dir: URL, withVideo: Bool) {
+        guard state == .idle else { return toast.show("Still finishing the last recording.", seconds: 2) }
+        Task { @MainActor in
+            do {
+                try await self.deliver(project, in: dir, withVideo: withVideo)
+            } catch {
+                Log.info("copy failed: \(error)")
+                self.toast.show("Could not copy it: \(error.localizedDescription)", seconds: 8)
+                self.state = .idle
+            }
+        }
     }
 
     /// The whole loop without hands, for checking a build: real capture, overlay, export and editor; only the mouse is simulated.
     @MainActor func selfTest(screenshot: String) async {
+        toast.hiddenFromCapture = false
         await start()
         guard state == .recording else { print("self test: did not start"); exit(1) }
         toolBar?.setTime(1)
@@ -416,6 +436,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? await Task.sleep(for: .seconds(1))
         let folder = dir!
         await stop()
+        shoot(toast.windowNumber, to: screenshot + "-toast.png")
         print("self test: \(folder.lastPathComponent)\n" + ((try? String(contentsOf: folder.appendingPathComponent("out/report.txt"), encoding: .utf8)) ?? "no report"))
         openEditor(folder)
         try? await Task.sleep(for: .seconds(2.5))
