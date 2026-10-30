@@ -41,10 +41,16 @@ public enum Report {
         case .said: return "\"\(e.text ?? "")\""
         case .note: return e.text ?? ""
         case .click: return "click\(at)\(place)"
-        case .app: return "switched to\(place)"
+        case .app: return "switched to \(e.app ?? "another app")"
         case .draw:
             if e.shape == .mark { return "marked this spot\(at)\(place)" }
-            let what = e.shape == .text ? "wrote \"\(e.text ?? "")\"" : "drew a \(e.shape?.rawValue ?? "mark")"
+            let what: String
+            switch e.shape {
+            case .text: what = "wrote \"\(e.text ?? "")\""
+            case .pen: what = "drew with the pen"
+            case .arrow: what = "drew an arrow"
+            default: what = "drew a \(e.shape?.rawValue ?? "mark")"
+            }
             return "\(what)\(at)"
         }
     }

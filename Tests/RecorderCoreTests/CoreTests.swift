@@ -97,6 +97,15 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(Report.document(p, frames: frames, videoAttached: false).contains("too big to attach"))
     }
 
+    func testReportWordingReadsLikeASentence() {
+        var p = twoClipProject()
+        p.events = [
+            Event(clipID: "a", t: 1, kind: .app, app: "Safari"),
+            Event(clipID: "a", t: 2, kind: .draw, shape: .pen, rect: NormRect(x: 0, y: 0, w: 1, h: 1)),
+        ]
+        XCTAssertEqual(Report.rows(p, frames: []).map(\.text), ["switched to Safari", "drew with the pen at 50% across, 50% down"])
+    }
+
     func testProjectRoundTrips() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
