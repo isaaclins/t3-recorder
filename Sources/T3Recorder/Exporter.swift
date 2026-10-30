@@ -5,13 +5,16 @@ import RecorderCore
 import UniformTypeIdentifiers
 
 struct ExportResult {
-    var text: String
-    var folder: URL
-    var uploaded: Bool
+    /// What goes on the clipboard, report first.
+    var files: [URL]
+    var videoAttached: Bool
 }
 
-/// Turns a project into what the agent gets: one video, the screenshots, a page and the clipboard text.
+/// Turns a project into what the agent gets: one video, the screenshots and the report.
 enum Exporter {
+    /// T3 takes files up to 50 MB.
+    static let maxAttachmentBytes = 48 * 1024 * 1024
+
     struct Timeline {
         var composition: AVMutableComposition
         var video: AVMutableVideoComposition
@@ -106,7 +109,7 @@ enum Exporter {
         return AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
     }
 
-    static func run(_ p: Project, in dir: URL, config: Config, status: @escaping @Sendable (String) -> Void) async throws -> ExportResult {
+    static func run(_ p: Project, in dir: URL, status: @escaping @Sendable (String) -> Void) async throws -> ExportResult {
         let out = dir.appendingPathComponent("out")
         try? FileManager.default.removeItem(at: out)
         let framesDir = out.appendingPathComponent("frames")
@@ -128,27 +131,22 @@ enum Exporter {
         let chosen = FramePicker.choose(FramePicker.moments(p, sceneChanges: changes, duration: duration))
         let frames = try await writeFrames(chosen, asset: asset, to: framesDir)
 
-        let remoteFolder = "\(config.remoteRoot)/\(p.id)"
-        let pageURL = "\(config.webRoot)/\(p.id)/"
-        try Page.html(p, frames: frames).write(to: out.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
-        var text = Report.clipboard(p, frames: frames, links: ReportLinks(folder: remoteFolder, pageURL: pageURL))
-        try text.write(to: out.appendingPathComponent("report.txt"), atomically: true, encoding: .utf8)
+        let size = (try? movie.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+        let videoAttached = size <= maxAttachmentBytes
+        let report = out.appendingPathComponent("report.txt")
+        try Report.document(p, frames: frames, videoAttached: videoAttached).write(to: report, atomically: true, encoding: .utf8)
+        var files = [report] + frames.map { framesDir.appendingPathComponent($0.file) }
+        if videoAttached { files.append(movie) }
+        return ExportResult(files: files, videoAttached: videoAttached)
+    }
 
-        // Screenshots and text first: that is what the agent reads, and it fits through a phone hotspot in seconds.
-        status("Uploading…")
-        var uploaded = true
-        do {
-            try await Uploader.send(out, id: p.id, config: config, mode: "replace", exclude: "recording.mp4")
-            let background = out
-            Task.detached {
-                do { try await Uploader.send(background, id: p.id, config: config, mode: "add", only: "recording.mp4") } catch { Log.info("video upload failed: \(error)") }
-            }
-        } catch {
-            Log.info("upload failed: \(error)")
-            uploaded = false
-            text = Report.clipboard(p, frames: frames, links: ReportLinks(folder: nil, pageURL: nil))
-        }
-        return ExportResult(text: text, folder: out, uploaded: uploaded)
+    /// Puts files on the clipboard the way Finder does. Plain file URLs would reach T3 one file only.
+    static func copyToClipboard(_ files: [URL]) {
+        let type = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.declareTypes([type], owner: nil)
+        board.setPropertyList(files.map(\.path), forType: type)
     }
 
     /// One small grey picture per second (fewer on long recordings) to notice when the screen changes.
@@ -192,7 +190,7 @@ enum Exporter {
             let name = String(format: "f-%02d-%02d-%d.jpg", Int(m.t) / 60, Int(m.t) % 60, Int(m.t * 10) % 10)
             guard let dest = CGImageDestinationCreateWithURL(dir.appendingPathComponent(name) as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { continue }
             CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
-            if CGImageDestinationFinalize(dest) { out.append(FrameRef(t: m.t, file: "frames/\(name)")) }
+            if CGImageDestinationFinalize(dest) { out.append(FrameRef(t: m.t, file: name)) }
         }
         return out
     }
@@ -249,68 +247,6 @@ enum OverlayArt {
         for side in [-0.5, 0.5] {
             p.move(to: b)
             p.addLine(to: CGPoint(x: b.x - head * cos(angle + side), y: b.y - head * sin(angle + side)))
-        }
-    }
-}
-
-/// The page Isaac gets for a recording: video plus the timeline, click a line to jump there.
-enum Page {
-    static func esc(_ s: String) -> String {
-        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
-    }
-
-    static func html(_ p: Project, frames: [FrameRef]) -> String {
-        var rows = ""
-        for r in Report.rows(p, frames: frames) {
-            let body = r.frame.map { "<img loading=lazy src=\"\(esc($0))\" alt=\"Screenshot\">" } ?? esc(r.text)
-            rows += "<button data-t=\"\(r.t)\"><b>\(Report.stamp(r.t))</b><i>\(r.label.lowercased())</i><span>\(body)</span></button>\n"
-        }
-        return """
-        <!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>\(p.id)</title>
-        <style>
-        body{margin:0;font:15px/1.45 -apple-system,system-ui,sans-serif;background:#111;color:#eee}
-        main{max-width:1000px;margin:auto;padding:16px}
-        video{width:100%;border-radius:8px;background:#000;position:sticky;top:8px}
-        button{all:unset;display:grid;grid-template-columns:52px 52px 1fr;gap:8px;width:100%;padding:8px 4px;border-bottom:1px solid #2a2a2a;cursor:pointer;box-sizing:border-box}
-        button:hover,button:focus-visible{background:#1d1d1d}
-        b{font-variant-numeric:tabular-nums}i{font-style:normal;color:#999}img{max-width:100%;border-radius:6px}
-        </style>
-        <main><video id=v src="recording.mp4" controls playsinline></video>
-        \(rows)</main>
-        <script>
-        const v=document.getElementById('v');
-        document.querySelectorAll('button').forEach(b=>b.onclick=()=>{v.currentTime=+b.dataset.t;v.play()});
-        </script>
-        """
-    }
-}
-
-/// Copies files to the Mac mini over ssh with a key that can do nothing except hand over a recording (server/receive-recording).
-enum Uploader {
-    static func send(_ folder: URL, id: String, config: Config, mode: String, exclude: String? = nil, only: String? = nil) async throws {
-        let script = #"""
-        set -o pipefail 2>/dev/null
-        cd "$1" || exit 1
-        if [ -n "$5" ]; then /usr/bin/tar -cf - "$5"; else /usr/bin/tar --exclude "$4" -cf - .; fi | \
-        /usr/bin/ssh -i "$2" -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new "$3" "$6"
-        """#
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = ["-c", script, "upload", folder.path, Config.keyFile.path, config.sshTarget, exclude ?? "", only ?? "", "\(id) \(mode)"]
-        let err = Pipe()
-        p.standardError = err
-        p.standardOutput = FileHandle.nullDevice
-        try p.run()
-        let status: Int32 = await withCheckedContinuation { c in
-            DispatchQueue.global().async {
-                p.waitUntilExit()
-                c.resume(returning: p.terminationStatus)
-            }
-        }
-        guard status == 0 else {
-            let why = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            throw RecorderError("Upload failed (\(status)): \(why)")
         }
     }
 }

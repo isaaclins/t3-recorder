@@ -378,19 +378,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Render, upload, clipboard. Also what the editor's Copy button runs.
+    /// Render, clipboard. Also what the editor's Copy button runs.
     @MainActor func deliver(_ project: Project, in dir: URL) async throws {
         state = .working
         let toast = self.toast
-        let result = try await Exporter.run(project, in: dir, config: config) { message in
+        let result = try await Exporter.run(project, in: dir) { message in
             DispatchQueue.main.async { toast.show(message) }
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(result.text, forType: .string)
+        Exporter.copyToClipboard(result.files)
         state = .idle
-        let message = result.uploaded ? "Copied. Paste it into T3." : "Copied, but only as text: the upload failed."
+        let message = result.videoAttached ? "Copied. Paste it into T3." : "Copied, without the video: it is over 50 MB."
         toast.show(message, button: "Edit", seconds: 12) { [weak self] in self?.openEditor(dir) }
-        Log.info("delivered \(project.id), uploaded: \(result.uploaded)")
+        Log.info("delivered \(project.id), \(result.files.count) files")
     }
 
     /// The whole loop without hands, for checking a build: real capture, overlay, export and editor; only the mouse is simulated.
@@ -417,7 +416,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? await Task.sleep(for: .seconds(1))
         let folder = dir!
         await stop()
-        print("self test: \(folder.lastPathComponent)\n" + (NSPasteboard.general.string(forType: .string) ?? "nothing on the clipboard"))
+        print("self test: \(folder.lastPathComponent)\n" + ((try? String(contentsOf: folder.appendingPathComponent("out/report.txt"), encoding: .utf8)) ?? "no report"))
         openEditor(folder)
         try? await Task.sleep(for: .seconds(2.5))
         shoot(editor?.window?.windowNumber, to: screenshot)

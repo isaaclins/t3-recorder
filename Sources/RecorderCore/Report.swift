@@ -10,18 +10,6 @@ public struct FrameRef: Equatable {
     }
 }
 
-/// Where the finished files live for whoever reads the report.
-public struct ReportLinks: Equatable {
-    /// Folder the agent can open on the Mac mini; nil when the upload failed.
-    public var folder: String?
-    public var pageURL: String?
-
-    public init(folder: String?, pageURL: String?) {
-        self.folder = folder
-        self.pageURL = pageURL
-    }
-}
-
 public struct TimelineRow: Equatable {
     public var t: Double
     public var label: String
@@ -85,25 +73,18 @@ public enum Report {
         return rows.sorted { $0.row.t != $1.row.t ? $0.row.t < $1.row.t : $0.order < $1.order }.map(\.row)
     }
 
-    /// The text that lands on the clipboard. Text only: T3 drops the text of a paste that also carries images.
-    public static func clipboard(_ p: Project, frames: [FrameRef], links: ReportLinks) -> String {
+    /// The report that travels with the screenshots. It goes as a file, because T3 drops pasted text when images come along.
+    public static func document(_ p: Project, frames: [FrameRef], videoAttached: Bool) -> String {
         let screen = p.clips.first?.screen
         var head = "Screen recording from Isaac, \(stamp(p.duration)) long"
         if let screen { head += ", \(screen.name) (\(screen.width)x\(screen.height))" }
         head += ". This shows the problem; his words are transcribed, so a word may be misheard."
         var lines = [head]
-        if let folder = links.folder {
-            lines.append("Files on the Mac mini: \(folder)/ . Open every FRAME below with your file reading tool before you answer. recording.mp4 is the full video.")
-        } else {
-            lines.append("The upload failed, so the screenshots and the video are not on the Mac mini. Only this text arrived.")
-        }
-        if let url = links.pageURL, links.folder != nil { lines.append("Isaac's page: \(url)") }
+        lines.append("The screenshots named below are attached to this message. Look at every one before you answer.")
+        lines.append(videoAttached ? "recording.mp4, also attached, is the full video." : "The full video was too big to attach; it stays on his Mac.")
         lines.append("")
         lines.append("Times are minutes:seconds into the video. Places are percent of the screen from the top left.")
-        for r in rows(p, frames: frames) {
-            let text = r.frame.map { f in links.folder.map { "\($0)/\(f)" } ?? f } ?? r.text
-            lines.append("[\(stamp(r.t))] \(r.label): \(text)")
-        }
+        for r in rows(p, frames: frames) { lines.append("[\(stamp(r.t))] \(r.label): \(r.text)") }
         return lines.joined(separator: "\n") + "\n"
     }
 }

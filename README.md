@@ -12,24 +12,33 @@ Show an agent what went wrong instead of describing it afterwards. A Mac menu ba
 
 Both ⌃⌥R and ⌃⌥M can be changed in the menu bar icon's menu.
 
-When you stop, it transcribes on the Mac with Parakeet (no audio leaves it), picks screenshots (after clicks, marks, screen changes, and at least every 12 seconds of talking), uploads screenshots and video to the Mac mini and puts a timestamped text on the clipboard:
+When you stop, it transcribes on the Mac with Parakeet (no audio leaves it) and picks screenshots: after clicks, marks and screen changes, and at least every 12 seconds of talking. Then the clipboard holds `report.txt`, the screenshots and `recording.mp4` (when under 50 MB). Paste into T3, add a word if you like, send.
 
 ```
 [00:03] CLICK: click at 50% across, 30% down in Safari "Settings"
-[00:04] FRAME: /Users/stewie/share/recordings/r-20261030-190000/frames/f-00-04-0.jpg
+[00:04] FRAME: f-00-04-0.jpg
 [00:05] SAID: "now the page goes blank"
 ```
 
-The clipboard holds text only, on purpose: when T3 gets text and images in one paste it keeps the images and drops the text. The agent opens the screenshot paths itself.
+They travel as files because T3 drops pasted text when images come along, and because T3's own connection then carries everything: no upload, no server, it works wherever T3 works.
 
-"Edit a recording" in the menu opens the editor: fix misheard words, remove lines, cut parts, add shapes and notes at a moment, record another section, then copy again. Edits never touch the raw clips in `~/Movies/T3 Recorder/`.
+"Edit a recording" in the menu opens the editor: fix misheard words, remove lines, cut parts, add shapes and notes at a moment, record another section, then copy again. Edits never touch the raw clips in `~/Library/Application Support/T3Recorder/Recordings/`.
+
+## Install
+
+Download the zip from the [latest release](https://github.com/isaaclins/t3-recorder/releases/latest), move `T3 Recorder.app` to Applications, then clear the download flag once (the app isn't notarized):
+
+```
+xattr -dr com.apple.quarantine "/Applications/T3 Recorder.app"
+```
+
+Open it and allow Screen Recording, Microphone and Accessibility. Updates install themselves.
 
 ## Parts
 
 - `Sources/RecorderCore`: timeline, cuts, screenshot choice, report text. No Apple media code, covered by `swift test`.
 - `Sources/T3Recorder`: the app.
-- `server/receive-recording`: forced command of the upload key on the mini (`~/house/bin/receive-recording`). The key can hand over a recording and do nothing else.
-- `scripts/install-mac.sh`: first install on the MacBook from the newest release, run from the mini.
+- `scripts/bundle.sh`, `scripts/release.sh`: build, sign, ship.
 - Settings: `~/Library/Application Support/T3Recorder/config.json`.
 
 ## Updates

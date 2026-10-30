@@ -1,10 +1,7 @@
 import Foundation
 
-/// Where finished recordings go. Lives in ~/Library/Application Support/T3Recorder/config.json; the defaults are the house.
+/// Settings, in ~/Library/Application Support/T3Recorder/config.json.
 struct Config: Codable {
-    var sshTarget = "stewie@100.90.249.60"
-    var remoteRoot = "/Users/stewie/share/recordings"
-    var webRoot = "https://agent-machine.isaaclins.com/share/recordings"
     /// Start and stop. Default Control-Option-R; Carbon key code and modifiers.
     var hotKeyCode: UInt32 = 15
     var hotKeyModifiers: UInt32 = 0x1000 | 0x0800
@@ -13,8 +10,8 @@ struct Config: Codable {
     var markHotKeyModifiers: UInt32 = 0x1000 | 0x0800
 
     static let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("T3Recorder")
-    static let recordings = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0].appendingPathComponent("T3 Recorder")
-    static var keyFile: URL { support.appendingPathComponent("upload_key") }
+    /// Not ~/Movies: macOS guards that folder, and T3 has to be able to read what lands on the clipboard.
+    static let recordings = support.appendingPathComponent("Recordings")
 
     func save() {
         try? FileManager.default.createDirectory(at: Config.support, withIntermediateDirectories: true)

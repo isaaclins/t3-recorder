@@ -87,16 +87,14 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(FramePicker.sceneChanges(samples: [(0, a), (1, drift), (2, b), (3, b), (4, a)]), [2, 4])
     }
 
-    func testClipboardHasPathsOrSaysUploadFailed() {
+    func testReportNamesFramesAndSaysWhereTheVideoIs() {
         let p = twoClipProject()
-        let frames = [FrameRef(t: 1.2, file: "frames/f-00-01.jpg")]
-        let ok = Report.clipboard(p, frames: frames, links: ReportLinks(folder: "/mini/r", pageURL: "https://x/r/"))
-        XCTAssertTrue(ok.contains("[00:01] FRAME: /mini/r/frames/f-00-01.jpg"))
-        XCTAssertTrue(ok.contains("[00:01] SAID: \"keep\""))
-        XCTAssertTrue(ok.contains("https://x/r/"))
-        let failed = Report.clipboard(p, frames: frames, links: ReportLinks(folder: nil, pageURL: "https://x/r/"))
-        XCTAssertTrue(failed.contains("upload failed"))
-        XCTAssertFalse(failed.contains("https://x/r/"))
+        let frames = [FrameRef(t: 1.2, file: "f-00-01-2.jpg")]
+        let with = Report.document(p, frames: frames, videoAttached: true)
+        XCTAssertTrue(with.contains("[00:01] FRAME: f-00-01-2.jpg"))
+        XCTAssertTrue(with.contains("[00:01] SAID: \"keep\""))
+        XCTAssertTrue(with.contains("recording.mp4, also attached"))
+        XCTAssertTrue(Report.document(p, frames: frames, videoAttached: false).contains("too big to attach"))
     }
 
     func testProjectRoundTrips() throws {
